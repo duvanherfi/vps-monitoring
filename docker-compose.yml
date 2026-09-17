@@ -52,25 +52,26 @@ services:
       - /:/host:ro,rslave
     networks: [monitoring]
 
-  # Per-container metrics: CPU, memory, network and disk I/O for every
-  # container on the host, including the services this stack does not own.
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
-    container_name: cadvisor
+  # Per-container metrics: CPU, memory and network for every container on the
+  # host, read from the Docker API.
+  #
+  # This is NOT cAdvisor. cAdvisor reads Docker's on-disk layer database and
+  # is broken on Docker 29: the containerd image store dropped the legacy
+  # image/<driver>/layerdb layout, so cAdvisor fails to create every container
+  # and reports only the root cgroup -- empty dashboards, dead alerts, and no
+  # error anywhere except its own logs.
+  telegraf:
+    image: telegraf:1.32
+    container_name: telegraf
     restart: unless-stopped
-    privileged: true
-    devices:
-      - /dev/kmsg:/dev/kmsg
-    command:
-      - --housekeeping_interval=15s
-      - --docker_only=true
-      - --store_container_labels=false
+    # Read-only socket access. The container runs as the unprivileged telegraf
+    # user, so it needs the host's docker group to open the socket at all.
+    # DOCKER_GID comes from .env: `stat -c %g /var/run/docker.sock`.
+    group_add:
+      - ${DOCKER_GID:?run "stat -c %g /var/run/docker.sock" and set DOCKER_GID in .env}
     volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [monitoring]
 
   grafana:

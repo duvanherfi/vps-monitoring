@@ -6,7 +6,7 @@ preguntas distintas, que conviene no mezclar:
 | Pregunta | Herramienta |
 |---|---|
 | ¿Cómo va el host? (CPU, RAM, disco, red) | node_exporter → Prometheus → Grafana |
-| ¿Cómo va cada servicio? (recursos por contenedor) | cAdvisor → Prometheus → Grafana |
+| ¿Cómo va cada servicio? (recursos por contenedor) | Telegraf (API de Docker) → Prometheus → Grafana |
 | ¿Está caído? | Uptime Kuma (dentro) + Healthchecks.io (fuera) |
 | ¿Quién me avisa? | Alertmanager → Telegram |
 
@@ -142,7 +142,7 @@ Comprueba que Prometheus ve sus targets:
 curl -s localhost:9090/api/v1/targets | grep -o '"health":"[a-z]*"'
 ```
 
-Deberías ver `"health":"up"` para `node-exporter` y `cadvisor`.
+Deberías ver `"health":"up"` para `node` y `docker`.
 
 ### Paso 9 — Firewall
 
@@ -262,24 +262,49 @@ networks:
 
 Y en Uptime Kuma usa `http://nombre-del-contenedor:puerto/health`.
 
+## Por qué Telegraf y no cAdvisor
+
+cAdvisor es la opción habitual para métricas por contenedor, y **no funciona en
+Docker 29**. Lee la base de capas en disco, en
+`/var/lib/docker/image/<driver>/layerdb/`, y el image store de containerd que
+Docker 29 trae por defecto (storage driver `overlayfs`) eliminó esa estructura.
+cAdvisor falla al crear *cada* contenedor:
+
+```
+failed to identify the read-write layer ID for container "a0ba6081..."
+open /rootfs/var/lib/docker/image/overlayfs/layerdb/mounts/.../mount-id:
+  no such file or directory
+```
+
+El resultado es silencioso y engañoso: cAdvisor arranca, responde, Prometheus
+lo scrapea con `health="up"`, y solo exporta el cgroup raíz. Dashboards vacíos,
+alertas que nunca saltan y ningún error salvo en sus propios logs. Probado con
+v0.49.1 y v0.52.1; ni `--disable_metrics=disk` ni `--docker_only=false` lo
+salvan.
+
+Telegraf lee la **API de Docker**, que es indiferente al storage driver, y de
+paso hereda las etiquetas `service` y `role` que Kamal pone en sus contenedores.
+
 ## Servicios desplegados con Kamal
 
 Kamal nombra los contenedores `<servicio>-<rol>-<sha-de-git>`, así que el nombre
 cambia en **cada** deploy. Eso rompe dos cosas si no se ajustan:
 
-**1. Las alertas.** `prometheus.yml` deriva una etiqueta `service` estable
-quitando el SHA de 40 caracteres, y las alertas de contenedor se apoyan en ella,
-no en `name`:
+**1. Las alertas.** Kamal etiqueta cada contenedor que gestiona con
+`service=<servicio>` y `role=<web|job>`, y esas etiquetas **no** cambian al
+desplegar. `prometheus.yml` las combina en una etiqueta `unit`, y las alertas se
+apoyan en ella, nunca en el nombre del contenedor:
 
-| Contenedor | Etiqueta `service` |
-|---|---|
-| `app-web-c7e216b8…` | `app-web` |
-| `app-job-c7e216b8…` | `app-job` |
-| `app-db` (accesorio) | `app-db` |
+| Contenedor | Etiquetas de Kamal | `unit` |
+|---|---|---|
+| `app-web-4fbed717…` | `service=app`, `role=web` | `app-web` |
+| `app-job-4fbed717…` | `service=app`, `role=job` | `app-job` |
+| `app-db` (accesorio) | `service=app-db` | `app-db` |
+| `prometheus` | (ninguna) | `prometheus` |
 
-Durante un deploy el contenedor viejo y el nuevo conviven un instante y ambos
-llevan `service="app-web"`, así que `ServiceHasNoContainer` no salta al
-desplegar. Solo salta si el servicio se queda sin ningún contenedor.
+Durante un deploy el contenedor viejo y el nuevo conviven y ambos llevan
+`unit="app-web"`, así que `UnitHasNoContainer` no salta al desplegar. Solo salta
+si la unidad se queda sin ningún contenedor.
 
 **2. La red.** Las apps viven en la red `kamal` y el monitoreo en `monitoring`.
 `uptime-kuma` está conectado a las dos para poder hablar con `kamal-proxy` y con
@@ -309,7 +334,7 @@ Para un accesorio de base de datos, un monitor **TCP Port** contra
 
 ## Añadir el tercer servicio
 
-1. **Métricas de contenedor**: nada que hacer. cAdvisor lo detecta solo.
+1. **Métricas de contenedor**: nada que hacer. Telegraf lo detecta solo.
 2. **Uptime**: añade un monitor en Uptime Kuma.
 3. **Métricas de aplicación** (si expone `/metrics`): descomenta un bloque en
    `prometheus/prometheus.yml`, conecta el servicio a la red `monitoring` y

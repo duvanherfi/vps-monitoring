@@ -71,56 +71,66 @@ groups:
 
   - name: containers
     rules:
-      # A stopped container does not go stale in cAdvisor, its series vanishes
-      # outright -- so `time() - container_last_seen > N` can never fire: there
-      # is nothing left to subtract from. The only way to catch a disappearance
-      # is to compare what existed recently against what exists now.
+      # Telegraf only reports RUNNING containers, so a stopped one does not go
+      # stale -- its series vanishes outright. `time() - something` can never
+      # fire for it, because there is nothing left to subtract from. The only
+      # way to catch a disappearance is to compare what existed recently
+      # against what exists now.
       #
-      # Keyed on the Kamal-stable `service` label, never on the container name:
-      # a deploy replaces app-web-<oldsha> with app-web-<newsha> and both carry
-      # service="app-web", so the service is never absent and this stays quiet.
-      - alert: ServiceHasNoContainer
+      # Keyed on `unit` (derived from Kamal's own service/role labels), never
+      # on container_name: a deploy swaps app-web-<oldsha> for app-web-<newsha>
+      # and both carry unit="app-web", so this stays quiet while shipping.
+      - alert: UnitHasNoContainer
         expr: |
-          count by (service) (max_over_time(container_last_seen{service!=""}[2h]))
+          count by (unit) (max_over_time(docker_container_status_uptime_ns[2h]))
             unless
-          count by (service) (container_last_seen{service!=""})
+          count by (unit) (docker_container_status_uptime_ns)
         for: 3m
         labels:
           severity: critical
         annotations:
-          summary: "Service {{ $labels.service }} has no running container"
-          description: "It was running within the last 2 hours and now has no container at all. Kamal overlaps old and new containers during a deploy, so this is a real outage."
+          summary: "{{ $labels.unit }} has no running container"
+          description: "It was running within the last 2 hours and now has none at all."
 
-      # Still keyed on name: a Kamal deploy creates a brand new series rather
-      # than restarting an existing one, so shipping does not trigger this.
+      # Kamal deploys start a fresh container whose restart_count is 0, so
+      # shipping never trips this. Only a container Docker keeps restarting in
+      # place does.
       - alert: ContainerRestartLoop
         expr: |
-          changes(container_start_time_seconds{name!=""}[15m]) > 3
+          increase(docker_container_status_restart_count[15m]) > 3
         labels:
           severity: critical
         annotations:
-          summary: "Container {{ $labels.name }} is restarting in a loop"
-          description: "{{ $value }} restarts in the last 15 minutes."
+          summary: "{{ $labels.unit }} is restarting in a loop"
+          description: "{{ $value }} restarts in the last 15 minutes ({{ $labels.container_name }})."
 
+      # The clearest signal there is that a container ran out of memory.
+      - alert: ContainerOOMKilled
+        expr: docker_container_status_oomkilled > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.unit }} was killed by the OOM killer"
+          description: "The kernel reclaimed it. Either it leaked or its limit is too low."
+
+      # Note: with no `memory` limit set in Kamal, Docker reports the host's
+      # total as the limit, so this compares against the whole machine. That is
+      # still the number that matters on a single-service-per-container VPS.
       - alert: ContainerHighMemory
-        expr: |
-          container_memory_working_set_bytes{service!=""}
-            / (container_spec_memory_limit_bytes{service!=""} != 0) * 100 > 90
+        expr: docker_container_mem_usage_percent > 90
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.service }} is near its memory limit"
-          description: "Using {{ printf \"%.0f\" $value }}% of its limit; the OOM killer is next."
+          summary: "{{ $labels.unit }} is using {{ printf \"%.0f\" $value }}% of available memory"
 
       - alert: ContainerHighCPU
-        expr: |
-          sum by (service) (rate(container_cpu_usage_seconds_total{service!=""}[5m])) * 100 > 90
+        expr: docker_container_cpu_usage_percent > 90
         for: 20m
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.service }} sustained above 90% of one CPU"
+          summary: "{{ $labels.unit }} sustained above 90% of one CPU"
 
   - name: scraping
     rules:

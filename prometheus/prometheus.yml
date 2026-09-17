@@ -26,29 +26,34 @@ scrape_configs:
         labels:
           instance: vps
 
-  # Every container running on the host, discovered automatically.
-  - job_name: cadvisor
+  # Every container on the host, read from the Docker API by Telegraf.
+  - job_name: docker
     static_configs:
-      - targets: ["cadvisor:8080"]
+      - targets: ["telegraf:9273"]
     metric_relabel_configs:
-      # Drop the noisiest cAdvisor series; they dominate storage and are
-      # rarely queried on a single-host setup.
-      - source_labels: [__name__]
-        regex: "container_(tasks_state|blkio_device_usage_total|memory_failures_total)"
-        action: drop
-      # Kamal names containers <service>-<role>-<git-sha>, so the raw name
-      # changes on every deploy. Anything alerting on `name` would fire a false
-      # positive each time you ship. Derive a stable label and alert on that.
-      #   app-web-c7e216b8...  ->  service="app-web"
-      - source_labels: [name]
-        regex: '(.+)-[0-9a-f]{40}'
-        target_label: service
-        replacement: '${1}'
-      # Containers without a version suffix (Kamal accessories such as app-db,
-      # and this stack itself) keep their own name as the service.
-      - source_labels: [service, name]
+      # Build a `unit` label that survives a deploy.
+      #
+      # Kamal stamps service=<service> and role=<web|job> on every container it
+      # manages, and those labels are stable; the container name is not, since
+      # it carries the git SHA and changes on every deploy. Alerts key on
+      # `unit`, never on container_name.
+      #
+      #   app-web-4fbed717...   service=app, role=web   -> unit="app-web"
+      #   app-db                service=app-db          -> unit="app-db"
+      #   prometheus            (no Kamal labels)       -> unit="prometheus"
+      - source_labels: [service, role]
+        regex: '(.+);(.+)'
+        target_label: unit
+        replacement: '${1}-${2}'
+      # Kamal accessories carry service but no role.
+      - source_labels: [unit, service]
         regex: ';(.+)'
-        target_label: service
+        target_label: unit
+        replacement: '${1}'
+      # Everything else (this stack, kamal-proxy) keeps its container name.
+      - source_labels: [unit, container_name]
+        regex: ';(.+)'
+        target_label: unit
         replacement: '${1}'
 
   # --- Application metrics -------------------------------------------------

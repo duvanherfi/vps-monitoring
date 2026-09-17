@@ -7,7 +7,7 @@ global:
 
 route:
   receiver: telegram
-  group_by: [alertname, name, mountpoint]
+  group_by: [alertname, unit, mountpoint]
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
