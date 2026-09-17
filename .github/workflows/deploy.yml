@@ -1,0 +1,119 @@
+name: Deploy
+
+# El stack no se construye: son imágenes públicas más ficheros de config. Por
+# eso este workflow no usa `kamal deploy`, solo `kamal accessory reboot`, que
+# vuelve a subir los ficheros y recrea el contenedor afectado.
+
+on:
+  push:
+    branches: [ main ]
+    # Un cambio en el README no debe reiniciar el monitoreo.
+    paths:
+      - 'prometheus/**'
+      - 'alertmanager/**'
+      - 'telegraf/**'
+      - 'grafana/**'
+      - 'config/deploy.yml'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Un YAML malo aquí deja a Prometheus sin arrancar, y con él las alertas.
+  # Se valida antes de tocar el servidor, no después.
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar config y reglas de Prometheus
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/prometheus:/etc/prometheus:ro" prom/prometheus:v3.1.0 \
+            check config /etc/prometheus/prometheus.yml
+
+      - name: Validar config de Alertmanager
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HEALTHCHECKS_PING_URL: ${{ secrets.HEALTHCHECKS_PING_URL }}
+        run: |
+          # El fichero es una plantilla ERB; se renderiza igual que lo hará
+          # Kamal, y se valida el resultado.
+          mkdir -p /tmp/am
+          ruby -rerb -e 'File.write("/tmp/am/alertmanager.yml", ERB.new(File.read("alertmanager/alertmanager.yml.erb")).result)'
+          docker run --rm --entrypoint amtool \
+            -v /tmp/am:/etc/alertmanager:ro prom/alertmanager:v0.28.0 \
+            check-config /etc/alertmanager/alertmanager.yml
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DOCKER_GID: ${{ vars.DOCKER_GID }}
+      KAMAL_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      GF_SECURITY_ADMIN_PASSWORD: ${{ secrets.GF_SECURITY_ADMIN_PASSWORD }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      HEALTHCHECKS_PING_URL: ${{ secrets.HEALTHCHECKS_PING_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Hacen falta dos commits para saber qué cambió.
+          fetch-depth: 2
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - run: gem install kamal -v 2.12.0
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Confiar en el host
+        run: ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Reiniciar solo los accessories afectados
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CHANGED="config/deploy.yml"   # forzado a mano: reinicia todo
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD)
+          fi
+          echo "Cambios:"; echo "$CHANGED" | sed 's/^/  /'
+
+          # Un cambio en deploy.yml puede afectar a cualquiera; el resto se
+          # mapea por carpeta. Reiniciar solo lo necesario evita quedarse
+          # ciego de más: cada reinicio es un hueco en las métricas.
+          if echo "$CHANGED" | grep -q '^config/deploy.yml'; then
+            TARGETS="all"
+          else
+            TARGETS=""
+            echo "$CHANGED" | grep -q '^prometheus/'   && TARGETS="$TARGETS prometheus"
+            echo "$CHANGED" | grep -q '^alertmanager/' && TARGETS="$TARGETS alertmanager"
+            echo "$CHANGED" | grep -q '^telegraf/'     && TARGETS="$TARGETS telegraf"
+            echo "$CHANGED" | grep -q '^grafana/'      && TARGETS="$TARGETS grafana"
+          fi
+
+          if [ -z "${TARGETS// }" ]; then
+            echo "Nada que reiniciar."; exit 0
+          fi
+
+          echo "Reiniciando:$TARGETS"
+          for t in $TARGETS; do
+            kamal accessory reboot "$t"
+          done
+
+      - name: Comprobar que Prometheus quedó en pie
+        run: |
+          sleep 20
+          ssh "deploy@$DEPLOY_HOST" \
+            'curl -sf localhost:9090/-/healthy && echo "prometheus OK"'

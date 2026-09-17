@@ -1,6 +1,6 @@
-# Copy to alertmanager.yml and fill in the placeholders.
-#   cp alertmanager/alertmanager.yml.example alertmanager/alertmanager.yml
-# The real file holds secrets and is git-ignored.
+# Rendered by Kamal on deploy. The secrets come from the environment via
+# .kamal/secrets, so this file is safe to commit -- unlike the git-ignored
+# copy it replaces, which had the token pasted into it on the server.
 
 global:
   resolve_timeout: 5m
@@ -32,8 +32,8 @@ route:
 receivers:
   - name: telegram
     telegram_configs:
-      - bot_token: "REPLACE_WITH_TELEGRAM_BOT_TOKEN"
-        chat_id: 000000000
+      - bot_token: "<%= ENV.fetch("TELEGRAM_BOT_TOKEN") %>"
+        chat_id: <%= ENV.fetch("TELEGRAM_CHAT_ID") %>
         parse_mode: HTML
         send_resolved: true
         message: |
@@ -45,7 +45,7 @@ receivers:
 
   - name: deadmanswitch
     webhook_configs:
-      - url: "https://hc-ping.com/REPLACE_WITH_HEALTHCHECKS_UUID"
+      - url: "<%= ENV.fetch("HEALTHCHECKS_PING_URL") %>"
         send_resolved: false
 
 inhibit_rules:

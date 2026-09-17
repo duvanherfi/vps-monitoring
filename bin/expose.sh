@@ -47,8 +47,8 @@ publish() {
 
 # Grafana answers 200 on /api/health. Uptime Kuma redirects on /, which
 # kamal-proxy reads as unhealthy, so check /api/entry-page instead.
-publish monitoring-grafana "$GRAFANA_HOST" grafana:3000       /api/health
-publish monitoring-kuma    "$KUMA_HOST"    uptime-kuma:3001   /api/entry-page
+publish monitoring-grafana "$GRAFANA_HOST" monitoring-grafana:3000       /api/health
+publish monitoring-kuma    "$KUMA_HOST"    monitoring-uptime-kuma:3001   /api/entry-page
 
 echo
 docker exec kamal-proxy kamal-proxy list

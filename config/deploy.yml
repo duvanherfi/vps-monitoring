@@ -1,0 +1,121 @@
+# El stack de monitoreo, desplegado con Kamal como accessories.
+#
+# Aquí no se construye ninguna imagen: son seis imágenes públicas más ficheros
+# de configuración. `service` e `image` existen porque Kamal los exige, pero el
+# rol primario nunca se despliega: este repo solo usa `kamal accessory`.
+#
+# Kamal nombra cada contenedor <service>-<accessory>, de ahí `monitoring-*` en
+# los targets de Prometheus y en el datasource de Grafana.
+
+service: monitoring
+
+# Nunca se despliega. Kamal exige la clave; esta imagen no se usa para nada.
+image: duvanherfi/monitoring-unused
+
+servers:
+  # Rol vacío a propósito: no hay app primaria que desplegar.
+  web:
+    hosts:
+      - <%= ENV.fetch("DEPLOY_HOST") %>
+
+# El proxy ya lo sirve kamal-proxy para metrics/status (ver bin/expose.sh).
+# Un accessory no pasa por el proxy, así que aquí no hay sección `proxy`.
+
+registry:
+  server: ghcr.io
+  username: duvanherfi
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+ssh:
+  user: deploy
+
+# Kamal exige la clave aunque aquí nunca se construya una imagen.
+builder:
+  arch: amd64
+
+accessories:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    host: <%= ENV.fetch("DEPLOY_HOST") %>
+    # Solo por loopback: Prometheus no tiene autenticación de ningún tipo.
+    port: "127.0.0.1:9090:9090"
+    cmd: >-
+      --config.file=/etc/prometheus/prometheus.yml
+      --storage.tsdb.path=/prometheus
+      --storage.tsdb.retention.time=30d
+      --web.enable-lifecycle
+    files:
+      - prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus/alerts.yml:/etc/prometheus/alerts.yml
+    volumes:
+      # Volumen ya existente, de la etapa con Compose: conserva el histórico.
+      - monitoring_prometheus_data:/prometheus
+    options:
+      user: "65534:65534"
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    host: <%= ENV.fetch("DEPLOY_HOST") %>
+    port: "127.0.0.1:9093:9093"
+    cmd: >-
+      --config.file=/etc/alertmanager/alertmanager.yml
+      --storage.path=/alertmanager
+    files:
+      # ERB: el token de Telegram y la URL de Healthchecks salen de los
+      # secretos, no de un fichero ignorado por git como antes.
+      - alertmanager/alertmanager.yml.erb:/etc/alertmanager/alertmanager.yml
+    volumes:
+      - monitoring_alertmanager_data:/alertmanager
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    host: <%= ENV.fetch("DEPLOY_HOST") %>
+    # Entrecomillado a la fuerza: Kamal pasa `cmd` por bash, y los paréntesis
+    # del regex serían sintaxis de shell. Compose no tenía este problema
+    # porque no invoca ningún shell.
+    cmd: >-
+      --path.rootfs=/host
+      '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run/credentials)($|/)' 
+    volumes:
+      - /:/host:ro,rslave
+    options:
+      pid: host
+
+  telegraf:
+    image: telegraf:1.32
+    host: <%= ENV.fetch("DEPLOY_HOST") %>
+    files:
+      - telegraf/telegraf.conf:/etc/telegraf/telegraf.conf
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    options:
+      # Telegraf corre sin privilegios: sin el grupo docker no abre el socket.
+      group-add: <%= ENV.fetch("DOCKER_GID", "988") %>
+
+  grafana:
+    image: grafana/grafana:11.5.0
+    host: <%= ENV.fetch("DEPLOY_HOST") %>
+    # Se publica por dominio con kamal-proxy; este puerto es el túnel SSH
+    # de respaldo.
+    port: "127.0.0.1:3000:3000"
+    env:
+      clear:
+        GF_SECURITY_ADMIN_USER: admin
+        GF_USERS_ALLOW_SIGN_UP: "false"
+        GF_SERVER_ROOT_URL: https://metrics.TU-DOMINIO
+        GF_INSTALL_PLUGINS: grafana-piechart-panel
+      secret:
+        - GF_SECURITY_ADMIN_PASSWORD
+    files:
+      - grafana/provisioning/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml
+      - grafana/provisioning/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+    volumes:
+      - monitoring_grafana_data:/var/lib/grafana
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    host: <%= ENV.fetch("DEPLOY_HOST") %>
+    port: "127.0.0.1:3001:3001"
+    volumes:
+      - monitoring_uptime_kuma_data:/app/data
