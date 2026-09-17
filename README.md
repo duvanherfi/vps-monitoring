@@ -111,12 +111,21 @@ se cae junto con lo que monitorea.
 
 ```bash
 docker compose config -q && echo "compose OK"
+```
 
-docker run --rm -v "$PWD/prometheus:/p:ro" prom/prometheus:v3.1.0 \
-  promtool check config /p/prometheus.yml
+Las imágenes de Prometheus y Alertmanager tienen su binario principal como
+`ENTRYPOINT`, así que hay que sobreescribirlo para llegar a las herramientas de
+validación. El volumen se monta en `/etc/prometheus` (no en una ruta cualquiera)
+para que `rule_files:` resuelva y `alerts.yml` se valide también:
 
-docker run --rm -v "$PWD/alertmanager:/a:ro" prom/alertmanager:v0.28.0 \
-  amtool check-config /a/alertmanager.yml
+```bash
+docker run --rm --entrypoint promtool \
+  -v "$PWD/prometheus:/etc/prometheus:ro" prom/prometheus:v3.1.0 \
+  check config /etc/prometheus/prometheus.yml
+
+docker run --rm --entrypoint amtool \
+  -v "$PWD/alertmanager:/etc/alertmanager:ro" prom/alertmanager:v0.28.0 \
+  check-config /etc/alertmanager/alertmanager.yml
 ```
 
 ### Paso 8 — Levantar el stack
@@ -270,6 +279,7 @@ docker compose exec prometheus kill -HUP 1
 ```bash
 # Validar la config de Prometheus antes de recargar
 docker compose exec prometheus promtool check config /etc/prometheus/prometheus.yml
+# (aqui si funciona sin --entrypoint: exec no pasa por el ENTRYPOINT de la imagen)
 
 # Ver qué alertas están activas
 curl -s localhost:9090/api/v1/alerts | jq
