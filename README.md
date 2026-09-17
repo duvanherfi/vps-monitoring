@@ -319,6 +319,30 @@ Para un accesorio de base de datos, un monitor **TCP Port** contra
 docker compose exec prometheus kill -HUP 1
 ```
 
+## Aplicar un cambio de configuración
+
+`docker compose up -d` **no basta**. Compose solo recrea un contenedor cuando su
+*definición* cambia; si lo único que cambió es el contenido de un fichero
+montado, Prometheus y Alertmanager siguen corriendo con la copia que cargaron en
+memoria al arrancar, y el cambio parece aplicado cuando no lo está.
+
+```bash
+git pull
+docker compose up -d                       # solo si cambio docker-compose.yml
+docker compose exec prometheus   kill -HUP 1   # recarga reglas y scrapes
+docker compose exec alertmanager kill -HUP 1   # recarga rutas y receptores
+```
+
+Comprueba que la recarga surtió efecto antes de darla por buena:
+
+```bash
+# las reglas que Prometheus tiene REALMENTE cargadas
+curl -s localhost:9090/api/v1/rules | grep -o '"name":"[A-Za-z]*"' | sort -u
+
+# los valores de la etiqueta derivada de Kamal
+curl -s localhost:9090/api/v1/label/service/values
+```
+
 ## Operación
 
 ```bash
