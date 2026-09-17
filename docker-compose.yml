@@ -103,7 +103,9 @@ services:
       - uptime_kuma_data:/app/data
     ports:
       - "127.0.0.1:3001:3001"
-    networks: [monitoring]
+    # Also on Kamal's network so it can reach kamal-proxy and the app
+    # containers directly, without going out to the public internet and back.
+    networks: [monitoring, kamal]
 
 volumes:
   prometheus_data:
@@ -114,3 +116,6 @@ volumes:
 networks:
   monitoring:
     name: monitoring
+  # Created by Kamal on first deploy; this stack only joins it.
+  kamal:
+    external: true

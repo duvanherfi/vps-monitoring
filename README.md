@@ -262,6 +262,51 @@ networks:
 
 Y en Uptime Kuma usa `http://nombre-del-contenedor:puerto/health`.
 
+## Servicios desplegados con Kamal
+
+Kamal nombra los contenedores `<servicio>-<rol>-<sha-de-git>`, así que el nombre
+cambia en **cada** deploy. Eso rompe dos cosas si no se ajustan:
+
+**1. Las alertas.** `prometheus.yml` deriva una etiqueta `service` estable
+quitando el SHA de 40 caracteres, y las alertas de contenedor se apoyan en ella,
+no en `name`:
+
+| Contenedor | Etiqueta `service` |
+|---|---|
+| `app-web-c7e216b8…` | `app-web` |
+| `app-job-c7e216b8…` | `app-job` |
+| `app-db` (accesorio) | `app-db` |
+
+Durante un deploy el contenedor viejo y el nuevo conviven un instante y ambos
+llevan `service="app-web"`, así que `ServiceHasNoContainer` no salta al
+desplegar. Solo salta si el servicio se queda sin ningún contenedor.
+
+**2. La red.** Las apps viven en la red `kamal` y el monitoreo en `monitoring`.
+`uptime-kuma` está conectado a las dos para poder hablar con `kamal-proxy` y con
+los contenedores por nombre, sin salir a internet y volver.
+
+### Monitores de Uptime Kuma con Kamal
+
+Para un rol `web`, apunta a `kamal-proxy` con la cabecera `Host`. Así pruebas la
+app y el proxy sin depender de DNS ni de Cloudflare:
+
+- **Monitor Type**: HTTP(s)
+- **URL**: `http://kamal-proxy/up`
+- **Headers**: `{ "Host": "app-a.TU-DOMINIO" }`
+- **Retries**: 2 (un deploy provoca un parpadeo de un segundo)
+- **Heartbeat Interval**: 60
+
+Añade además un monitor externo gratuito (UptimeRobot) contra
+`https://app-a.TU-DOMINIO/up`: ese sí prueba DNS, Cloudflare y el certificado.
+
+Para un rol `job` (sin HTTP, como `app-job`), usa un monitor de tipo **Push**:
+Uptime Kuma te da una URL y un job recurrente de Solid Queue la llama. Si el
+worker se atasca, dejan de llegar pings y salta la alerta. Mientras tanto,
+`ServiceHasNoContainer` ya cubre el caso de que el contenedor muera.
+
+Para un accesorio de base de datos, un monitor **TCP Port** contra
+`app-db:5432` desde la red `kamal`.
+
 ## Añadir el tercer servicio
 
 1. **Métricas de contenedor**: nada que hacer. cAdvisor lo detecta solo.

@@ -71,18 +71,21 @@ groups:
 
   - name: containers
     rules:
-      # A service that was running and then disappeared from cAdvisor.
-      - alert: ContainerDisappeared
+      # Keyed on the Kamal-stable `service` label, never on the container name:
+      # a deploy replaces app-web-<oldsha> with app-web-<newsha>, and both carry
+      # service="app-web", so max() stays fresh and this does not fire.
+      - alert: ServiceHasNoContainer
         expr: |
-          absent_over_time(container_last_seen{name!=""}[2m])
-          or (time() - container_last_seen{name!=""} > 120)
+          (time() - max by (service) (container_last_seen{service!=""})) > 180
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "Container {{ $labels.name }} is gone"
-          description: "It has not reported to cAdvisor for over 2 minutes."
+          summary: "Service {{ $labels.service }} has no running container"
+          description: "No container for this service has reported for 3 minutes. A Kamal deploy overlaps old and new containers, so this is a real outage, not deploy noise."
 
+      # Still keyed on name: a Kamal deploy creates a brand new series rather
+      # than restarting an existing one, so shipping does not trigger this.
       - alert: ContainerRestartLoop
         expr: |
           changes(container_start_time_seconds{name!=""}[15m]) > 3
@@ -94,23 +97,23 @@ groups:
 
       - alert: ContainerHighMemory
         expr: |
-          container_memory_working_set_bytes{name!=""}
-            / (container_spec_memory_limit_bytes{name!=""} != 0) * 100 > 90
+          container_memory_working_set_bytes{service!=""}
+            / (container_spec_memory_limit_bytes{service!=""} != 0) * 100 > 90
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "Container {{ $labels.name }} near its memory limit"
+          summary: "{{ $labels.service }} is near its memory limit"
           description: "Using {{ printf \"%.0f\" $value }}% of its limit; the OOM killer is next."
 
       - alert: ContainerHighCPU
         expr: |
-          sum by (name) (rate(container_cpu_usage_seconds_total{name!=""}[5m])) * 100 > 90
+          sum by (service) (rate(container_cpu_usage_seconds_total{service!=""}[5m])) * 100 > 90
         for: 20m
         labels:
           severity: warning
         annotations:
-          summary: "Container {{ $labels.name }} sustained above 90% of one CPU"
+          summary: "{{ $labels.service }} sustained above 90% of one CPU"
 
   - name: scraping
     rules:

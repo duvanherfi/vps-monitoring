@@ -36,6 +36,20 @@ scrape_configs:
       - source_labels: [__name__]
         regex: "container_(tasks_state|blkio_device_usage_total|memory_failures_total)"
         action: drop
+      # Kamal names containers <service>-<role>-<git-sha>, so the raw name
+      # changes on every deploy. Anything alerting on `name` would fire a false
+      # positive each time you ship. Derive a stable label and alert on that.
+      #   app-web-c7e216b8...  ->  service="app-web"
+      - source_labels: [name]
+        regex: '(.+)-[0-9a-f]{40}'
+        target_label: service
+        replacement: '${1}'
+      # Containers without a version suffix (Kamal accessories such as app-db,
+      # and this stack itself) keep their own name as the service.
+      - source_labels: [service, name]
+        regex: ';(.+)'
+        target_label: service
+        replacement: '${1}'
 
   # --- Application metrics -------------------------------------------------
   # Uncomment and adapt one block per service that exposes a /metrics endpoint.
