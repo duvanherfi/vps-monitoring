@@ -1,1 +1,4 @@
-.kamal/secrets*
+# .kamal/secrets se commitea: solo tiene indirecciones VAR=$VAR, los valores
+# vienen del entorno. Lo que nunca se sube son los ficheros con valores reales.
+.kamal/secrets.*
+.kamal/secrets-local
