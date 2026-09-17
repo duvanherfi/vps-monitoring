@@ -89,9 +89,12 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
     ports:
+      # Kept for the SSH-tunnel fallback, which still works when the public
+      # hostname or Cloudflare Access is in the way.
       - "127.0.0.1:3000:3000"
     depends_on: [prometheus]
-    networks: [monitoring]
+    # Also on Kamal's network so kamal-proxy can route metrics.TU-DOMINIO here.
+    networks: [monitoring, kamal]
 
   # Black-box uptime checks per service, with its own alerting and status page.
   # Kept separate from Prometheus on purpose: it answers "is it down?" without

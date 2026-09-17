@@ -344,6 +344,99 @@ Para un accesorio de base de datos, un monitor **TCP Port** contra
 docker compose exec prometheus kill -HUP 1
 ```
 
+## Exponer por dominio (metrics + status)
+
+Grafana en `metrics.TU-DOMINIO` y Uptime Kuma en `status.TU-DOMINIO`, sirviendo
+por el mismo `kamal-proxy` que ya atiende las apps. No hace falta otro proxy ni
+abrir puertos nuevos.
+
+Dos subdominios y no una subruta porque **Uptime Kuma no soporta correr bajo un
+path**: rompe el WebSocket del panel. Grafana sí lo haría, pero no compensa
+partir la configuración.
+
+### Por qué un Origin Certificate y no Let's Encrypt
+
+Estos dos son paneles de administración. Publicarlos con ACME obliga a dejar el
+DNS en **gris** (DNS-only), porque el reto HTTP-01 no atraviesa la nube naranja
+— y en gris Cloudflare no puede filtrar nada: la única defensa sería el login de
+cada aplicación.
+
+Con un **Origin Certificate** de Cloudflare el registro puede ir en **naranja**,
+y entonces **Cloudflare Access** se pone delante: nadie llega siquiera a la
+pantalla de login sin autenticarse antes. Esa es la diferencia que justifica los
+pasos extra.
+
+El resto de tus servicios sigue con Let's Encrypt y nube gris; esto solo aplica
+a estos dos hostnames.
+
+### 1. En el panel de Cloudflare
+
+**Origin Certificate** — SSL/TLS → Origin Server → Create Certificate. Deja la
+clave privada RSA, cubre `*.TU-DOMINIO` y `TU-DOMINIO`, y copia las dos partes.
+
+**Modo SSL** — SSL/TLS → Overview → **Full (strict)**.
+
+**DNS** — dos registros A a la IP del VPS, ambos con la **nube naranja**:
+
+| Tipo | Nombre | Contenido | Proxy |
+|---|---|---|---|
+| A | `metrics` | la IP del VPS | 🟠 Proxied |
+| A | `status` | la IP del VPS | 🟠 Proxied |
+
+**Cloudflare Access** — Zero Trust → Access → Applications → Add a
+self-hosted application, una por hostname. Como política, *Allow* con tu email.
+El plan gratuito cubre hasta 50 usuarios.
+
+### 2. En el VPS
+
+Deja el certificado donde `kamal-proxy` pueda leerlo:
+
+```bash
+sudo mkdir -p /var/lib/docker/volumes/kamal-proxy-config/_data/origin
+cd /var/lib/docker/volumes/kamal-proxy-config/_data/origin
+sudo nano cert.pem   # pega el Origin Certificate
+sudo nano key.pem    # pega la Private Key
+```
+
+Apunta Grafana a su URL pública y engánchalo a la red de Kamal:
+
+```bash
+cd ~/monitoring
+git pull
+sed -i 's|^GRAFANA_ROOT_URL=.*|GRAFANA_ROOT_URL=https://metrics.TU-DOMINIO|' .env
+docker compose up -d
+```
+
+Y publica ambos:
+
+```bash
+./bin/expose.sh
+```
+
+El script ajusta permisos (kamal-proxy corre sin privilegios y no puede leer
+ficheros de root), registra las dos rutas y lista el resultado.
+
+### Comprobar
+
+```bash
+curl -sI https://metrics.TU-DOMINIO | head -1   # 302 a Cloudflare Access
+curl -sI https://status.TU-DOMINIO  | head -1
+docker exec kamal-proxy kamal-proxy list
+```
+
+Las rutas viven en `kamal-proxy.state`, dentro del volumen `kamal-proxy-config`,
+así que sobreviven a reinicios del proxy y a los despliegues de tus apps.
+
+### Lo que NO se expone
+
+Prometheus y Alertmanager siguen solo en `127.0.0.1`, y ahí se quedan: no tienen
+autenticación de ningún tipo y revelan la topología completa de la máquina. Para
+ellos, el túnel SSH:
+
+```bash
+ssh -L 9090:localhost:9090 -L 9093:localhost:9093 root@TU-IP
+```
+
 ## Aplicar un cambio de configuración
 
 `docker compose up -d` **no basta**. Compose solo recrea un contenedor cuando su
