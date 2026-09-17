@@ -1,0 +1,125 @@
+# Alert rules. Thresholds are deliberately conservative: an alert that fires
+# every week gets muted, and a muted alert is worse than no alert.
+
+groups:
+  - name: deadmanswitch
+    rules:
+      # Always firing. Routed to an external service (Healthchecks.io) which
+      # alerts when the pings STOP -- that is what catches the VPS dying,
+      # Prometheus crashing, or the network going away.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+
+  - name: host
+    rules:
+      - alert: HostDown
+        expr: up{job="node"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The host stopped reporting metrics"
+          description: "node-exporter has been unreachable for 2 minutes."
+
+      - alert: HostHighCPU
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU above 85% for 15 minutes"
+          description: "Current usage: {{ printf \"%.0f\" $value }}%."
+
+      - alert: HostHighMemory
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory above 90%"
+          description: "Available memory is under 10% of total."
+
+      - alert: HostDiskFillingUp
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+               / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk {{ $labels.mountpoint }} is {{ printf \"%.0f\" $value }}% full"
+
+      - alert: HostDiskWillFillIn24h
+        expr: |
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 24*3600) < 0
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk {{ $labels.mountpoint }} will run out of space within 24h"
+          description: "Based on the last 6 hours of growth."
+
+      - alert: HostSwapping
+        expr: (1 - node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes) * 100 > 50
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Swap usage above 50%"
+
+  - name: containers
+    rules:
+      # A service that was running and then disappeared from cAdvisor.
+      - alert: ContainerDisappeared
+        expr: |
+          absent_over_time(container_last_seen{name!=""}[2m])
+          or (time() - container_last_seen{name!=""} > 120)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.name }} is gone"
+          description: "It has not reported to cAdvisor for over 2 minutes."
+
+      - alert: ContainerRestartLoop
+        expr: |
+          changes(container_start_time_seconds{name!=""}[15m]) > 3
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.name }} is restarting in a loop"
+          description: "{{ $value }} restarts in the last 15 minutes."
+
+      - alert: ContainerHighMemory
+        expr: |
+          container_memory_working_set_bytes{name!=""}
+            / (container_spec_memory_limit_bytes{name!=""} != 0) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} near its memory limit"
+          description: "Using {{ printf \"%.0f\" $value }}% of its limit; the OOM killer is next."
+
+      - alert: ContainerHighCPU
+        expr: |
+          sum by (name) (rate(container_cpu_usage_seconds_total{name!=""}[5m])) * 100 > 90
+        for: 20m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} sustained above 90% of one CPU"
+
+  - name: scraping
+    rules:
+      # Catches an application whose /metrics endpoint went away, which usually
+      # means the app is up but broken.
+      - alert: TargetDown
+        expr: up{job!~"node|prometheus"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.job }} ({{ $labels.instance }})"

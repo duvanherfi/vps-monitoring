@@ -1,0 +1,116 @@
+# VPS monitoring stack: host metrics, per-container metrics, dashboards,
+# alerting and uptime checks.
+#
+# Security note: every UI is bound to 127.0.0.1 on purpose. Reach them through
+# an SSH tunnel or put them behind your existing reverse proxy with auth.
+# Never expose Prometheus, cAdvisor or Alertmanager directly to the internet.
+
+name: monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: prometheus
+    restart: unless-stopped
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [monitoring]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    networks: [monitoring]
+
+  # Host-level metrics: CPU, RAM, disk, network, load, filesystems.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node-exporter
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run/credentials)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+    networks: [monitoring]
+
+  # Per-container metrics: CPU, memory, network and disk I/O for every
+  # container on the host, including the services this stack does not own.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    command:
+      - --housekeeping_interval=15s
+      - --docker_only=true
+      - --store_container_labels=false
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks: [monitoring]
+
+  grafana:
+    image: grafana/grafana:11.5.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      # Pre-installed panels used by the community dashboards below.
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: [prometheus]
+    networks: [monitoring]
+
+  # Black-box uptime checks per service, with its own alerting and status page.
+  # Kept separate from Prometheus on purpose: it answers "is it down?" without
+  # any PromQL, which is the question you ask at 3am.
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime_kuma_data:/app/data
+    ports:
+      - "127.0.0.1:3001:3001"
+    networks: [monitoring]
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+  uptime_kuma_data:
+
+networks:
+  monitoring:
+    name: monitoring

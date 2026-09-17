@@ -1,0 +1,52 @@
+# Scrape config for the VPS. Add one job per service that exposes /metrics.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    vps: main   # rename if you ever add a second server
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Host: CPU, RAM, disk, network.
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          instance: vps
+
+  # Every container running on the host, discovered automatically.
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    metric_relabel_configs:
+      # Drop the noisiest cAdvisor series; they dominate storage and are
+      # rarely queried on a single-host setup.
+      - source_labels: [__name__]
+        regex: "container_(tasks_state|blkio_device_usage_total|memory_failures_total)"
+        action: drop
+
+  # --- Application metrics -------------------------------------------------
+  # Uncomment and adapt one block per service that exposes a /metrics endpoint.
+  # The target must be reachable from the `monitoring` network: either attach
+  # the service's container to it, or use host.docker.internal / the host IP.
+  #
+  # - job_name: service-a
+  #   static_configs:
+  #     - targets: ["service-a:9091"]
+  #
+  # - job_name: service-b
+  #   metrics_path: /metrics
+  #   static_configs:
+  #     - targets: ["service-b:3000"]

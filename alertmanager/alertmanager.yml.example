@@ -1,0 +1,55 @@
+# Copy to alertmanager.yml and fill in the placeholders.
+#   cp alertmanager/alertmanager.yml.example alertmanager/alertmanager.yml
+# The real file holds secrets and is git-ignored.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: telegram
+  group_by: [alertname, name, mountpoint]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # The always-firing Watchdog goes to an external dead man's switch instead
+    # of to you. Healthchecks.io alerts when these pings stop arriving, which
+    # is how you learn the whole VPS (or Alertmanager itself) went down.
+    - receiver: deadmanswitch
+      matchers:
+        - alertname = "Watchdog"
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+
+    # Critical alerts repeat more aggressively.
+    - receiver: telegram
+      matchers:
+        - severity = "critical"
+      repeat_interval: 1h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: "REPLACE_WITH_TELEGRAM_BOT_TOKEN"
+        chat_id: 000000000
+        parse_mode: HTML
+        send_resolved: true
+        message: |
+          {{ if eq .Status "firing" }}🔴{{ else }}✅{{ end }} <b>{{ .CommonLabels.alertname }}</b> ({{ .Status }})
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+          {{ with .Annotations.description }}<i>{{ . }}</i>{{ end }}
+          {{ end }}
+
+  - name: deadmanswitch
+    webhook_configs:
+      - url: "https://hc-ping.com/REPLACE_WITH_HEALTHCHECKS_UUID"
+        send_resolved: false
+
+inhibit_rules:
+  # If the host is down, do not also page about every container on it.
+  - source_matchers: [alertname = "HostDown"]
+    target_matchers: [severity =~ "critical|warning"]
+    equal: [vps]
