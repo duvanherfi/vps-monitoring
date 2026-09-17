@@ -77,7 +77,13 @@ jobs:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
       - name: Confiar en el host
-        run: ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+        # Sin -H a propósito: Kamal usa Net::SSH (Ruby), que no resuelve bien
+        # las entradas hasheadas de known_hosts y acaba comparando contra otra
+        # clave de host. El cliente de OpenSSH sí las entiende, de ahí que a
+        # mano funcione y aquí no.
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
       - name: Reiniciar solo los accessories afectados
         run: |
