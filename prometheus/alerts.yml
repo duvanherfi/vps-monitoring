@@ -80,12 +80,24 @@ groups:
       # Keyed on `unit` (derived from Kamal's own service/role labels), never
       # on container_name: a deploy swaps app-web-<oldsha> for app-web-<newsha>
       # and both carry unit="app-web", so this stays quiet while shipping.
+      #
+      # `and on() up{job="docker"} == 1` is a guard, not decoration: if Telegraf
+      # itself stops being scraped, every container series goes stale at once
+      # and this would page once per unit. TargetDown covers that case instead.
+      #
+      # Detection takes ~6 minutes: Prometheus keeps a series queryable for 5
+      # minutes after its last sample (the lookback delta), and `for` adds one
+      # more. Uptime Kuma is what catches a web service in under a minute; this
+      # is the backstop for what cannot be checked over HTTP, such as app-job.
       - alert: UnitHasNoContainer
         expr: |
-          count by (unit) (max_over_time(docker_container_status_uptime_ns[2h]))
-            unless
-          count by (unit) (docker_container_status_uptime_ns)
-        for: 3m
+          (
+            count by (unit) (max_over_time(docker_container_status_uptime_ns[2h]))
+              unless
+            count by (unit) (docker_container_status_uptime_ns)
+          )
+          and on() (up{job="docker"} == 1)
+        for: 1m
         labels:
           severity: critical
         annotations:
