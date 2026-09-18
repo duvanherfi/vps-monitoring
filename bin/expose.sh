@@ -13,8 +13,10 @@
 
 set -euo pipefail
 
-GRAFANA_HOST="${GRAFANA_HOST:-metrics.TU-DOMINIO}"
-KUMA_HOST="${KUMA_HOST:-status.TU-DOMINIO}"
+# No defaults on purpose: this repo is public, so the hostnames come from
+# the environment rather than being baked in.
+GRAFANA_HOST="${GRAFANA_HOST:?export GRAFANA_HOST=metrics.your-domain}"
+KUMA_HOST="${KUMA_HOST:?export KUMA_HOST=status.your-domain}"
 
 # kamal-proxy's config volume, seen from the host and from inside the container.
 ORIGIN_DIR="${ORIGIN_DIR:-/var/lib/docker/volumes/kamal-proxy-config/_data/origin}"

@@ -103,14 +103,15 @@ accessories:
       clear:
         GF_SECURITY_ADMIN_USER: admin
         GF_USERS_ALLOW_SIGN_UP: "false"
-        GF_SERVER_ROOT_URL: https://metrics.TU-DOMINIO
+        # From the environment, not hardcoded: this repo is public.
+        GF_SERVER_ROOT_URL: <%= ENV.fetch("GRAFANA_ROOT_URL", "http://localhost:3000") %>
         GF_INSTALL_PLUGINS: grafana-piechart-panel
       secret:
         - GF_SECURITY_ADMIN_PASSWORD
     files:
       - grafana/provisioning/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml
-      # Kamal sube ficheros de uno en uno: cada dashboard nuevo hay que
-      # añadirlo aquí, o Grafana no lo verá.
+      # Kamal uploads files one by one: every new dashboard needs its own
+      # entry here, or Grafana never sees it.
       - grafana/provisioning/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
       - grafana/provisioning/dashboards/overview.json:/etc/grafana/provisioning/dashboards/overview.json
       - grafana/provisioning/dashboards/containers.json:/etc/grafana/provisioning/dashboards/containers.json

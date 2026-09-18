@@ -2,3 +2,8 @@
 # vienen del entorno. Lo que nunca se sube son los ficheros con valores reales.
 .kamal/secrets.*
 .kamal/secrets-local
+
+# ESTADO.md es la bitácora de trabajo: lleva la IP de la VPS, los dominios y
+# qué servicio va en cada host. Este repo es público, así que vive solo en
+# local. El README es lo que se publica.
+ESTADO.md

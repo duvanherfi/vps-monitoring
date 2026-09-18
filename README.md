@@ -233,7 +233,7 @@ reinicia todo, porque puede afectar a cualquiera.
 ### A mano
 
 ```bash
-export DEPLOY_HOST=TU-IP  DOCKER_GID=988
+export DEPLOY_HOST=TU-IP  DOCKER_GID=988  GRAFANA_ROOT_URL=https://metrics.TU-DOMINIO
 export KAMAL_REGISTRY_PASSWORD=...  GF_SECURITY_ADMIN_PASSWORD=...
 export TELEGRAM_BOT_TOKEN=...  TELEGRAM_CHAT_ID=...  HEALTHCHECKS_PING_URL=...
 
@@ -270,8 +270,14 @@ docker exec monitoring-prometheus \
 `GF_SECURITY_ADMIN_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
 `HEALTHCHECKS_PING_URL`.
 
-**Variables**: `DEPLOY_HOST` (la IP, para que no acabe en git) y `DOCKER_GID`
-(`stat -c %g /var/run/docker.sock`).
+**Variables**: `DEPLOY_HOST` (la IP), `DOCKER_GID`
+(`stat -c %g /var/run/docker.sock`) y `GRAFANA_ROOT_URL` (la URL pública de
+Grafana).
+
+Nada de eso está en el repo a propósito: **esto es público**. La IP, los
+dominios y los secretos entran por el entorno, y la bitácora de trabajo
+(`ESTADO.md`, con la IP y qué servicio va en cada host) está en `.gitignore` y
+vive solo en local.
 
 ### Añadir un servicio nuevo al monitoreo
 
@@ -414,15 +420,16 @@ sudo nano cert.pem   # pega el Origin Certificate
 sudo nano key.pem    # pega la Private Key
 ```
 
-Y publica ambos:
+Y publica ambos (los hostnames ya no están dentro del script):
 
 ```bash
-./bin/expose.sh
+GRAFANA_HOST=metrics.TU-DOMINIO KUMA_HOST=status.TU-DOMINIO ./bin/expose.sh
 ```
 
 El script ajusta permisos (kamal-proxy corre sin privilegios y no puede leer
-ficheros de root), registra las dos rutas y lista el resultado. `GF_SERVER_ROOT_URL`
-ya apunta a `https://metrics.TU-DOMINIO` en `config/deploy.yml`.
+ficheros de root), registra las dos rutas y lista el resultado. Para que los
+enlaces que genera Grafana salgan bien, la variable `GRAFANA_ROOT_URL` de
+GitHub tiene que apuntar a `https://metrics.TU-DOMINIO`.
 
 ### 3. Comprobar
 
