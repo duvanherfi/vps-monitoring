@@ -36,10 +36,12 @@ jobs:
             check config /etc/prometheus/prometheus.yml
 
       - name: Validar config de Alertmanager
+        # Valores de relleno si no hay secrets: así la plantilla se valida
+        # sola en un repo sin configurar. amtool solo mira la forma.
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          HEALTHCHECKS_PING_URL: ${{ secrets.HEALTHCHECKS_PING_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || '123456:dummy-token-for-validation' }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || '1' }}
+          HEALTHCHECKS_PING_URL: ${{ secrets.HEALTHCHECKS_PING_URL || 'https://hc-ping.com/00000000-0000-0000-0000-000000000000' }}
         run: |
           # El fichero es una plantilla ERB; se renderiza igual que lo hará
           # Kamal, y se valida el resultado.
@@ -52,6 +54,9 @@ jobs:
   deploy:
     needs: validate
     runs-on: ubuntu-latest
+    # Sin DEPLOY_HOST no hay nada contra lo que desplegar: es el caso del repo
+    # plantilla, donde este job se salta en vez de fallar.
+    if: vars.DEPLOY_HOST != ''
     env:
       DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
       DOCKER_GID: ${{ vars.DOCKER_GID }}
