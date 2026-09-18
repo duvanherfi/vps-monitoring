@@ -109,7 +109,12 @@ accessories:
         - GF_SECURITY_ADMIN_PASSWORD
     files:
       - grafana/provisioning/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml
+      # Kamal sube ficheros de uno en uno: cada dashboard nuevo hay que
+      # añadirlo aquí, o Grafana no lo verá.
       - grafana/provisioning/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - grafana/provisioning/dashboards/overview.json:/etc/grafana/provisioning/dashboards/overview.json
+      - grafana/provisioning/dashboards/containers.json:/etc/grafana/provisioning/dashboards/containers.json
+      - grafana/provisioning/dashboards/host.json:/etc/grafana/provisioning/dashboards/host.json
     volumes:
       - monitoring_grafana_data:/var/lib/grafana
 
