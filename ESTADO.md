@@ -69,6 +69,18 @@ Ambos repos desplegados ya tienen push-to-deploy con GitHub Actions y funciona.
       secreto** (ni token de Telegram, ni URL de Healthchecks real, ni claves),
       así que no hay nada que rotar.
 
+- [x] **Separado en dos repos.** El público `duvanherfi/vps-monitoring` es la
+      plantilla: paso a paso de instalación, cero datos reales, y el job de
+      deploy se salta solo porque no tiene `DEPLOY_HOST` (verificado: `validate`
+      en verde, `deploy` skipped). El privado
+      `duvanherfi/vps-monitoring-private` es el que despliega: tiene los 5
+      secrets, las 3 variables y esta bitácora. Deploy desde el privado probado
+      y en verde. Los secrets y variables se borraron del público.
+- [x] **`/root/monitoring` borrado del VPS.** Antes comprobé que sus dos
+      ficheros con secretos (`.env` y el `alertmanager.yml` escrito a mano)
+      tenían exactamente los mismos valores que ya estaban desplegados desde los
+      secrets de GitHub, así que no se perdió nada.
+
 ## Falta
 
 - [ ] **Uptime Kuma no tiene ninguna notificación configurada.** Es la causa de
@@ -86,9 +98,6 @@ Ambos repos desplegados ya tienen push-to-deploy con GitHub Actions y funciona.
       registros estén en naranja. Es lo que de verdad hace irrelevante que se
       conozca la IP de origen; ahora mismo ufw deja 80/443 abiertos a todo
       internet.
-- [ ] Borrar `/root/monitoring` del VPS: quedó obsoleto tras la migración y
-      todavía contiene `.env` y el `alertmanager.yml` con los secretos.
-      Comprobado el 2026-09-18: sigue ahí.
 - [ ] **Cloudflare** (manual, no tengo token): Origin Certificate, registros A
       `metrics` y `status` en naranja, SSL en Full (strict), y dos aplicaciones
       de Cloudflare Access. Luego `./bin/expose.sh` en el VPS.
@@ -105,6 +114,12 @@ Ambos repos desplegados ya tienen push-to-deploy con GitHub Actions y funciona.
       salir de la red `kamal` deja de resolver por nombre.
 
 ## Decisiones y por qué
+
+- **Dos repos, no uno.** El público es la plantilla y el privado despliega. La
+  única diferencia intencionada entre ambos es la línea de `ESTADO.md` en el
+  `.gitignore`, para que `git pull upstream main` no dé conflictos. Todo lo
+  específico de esta máquina (IP, dominios, secretos) vive en variables y
+  secrets de GitHub, no en ficheros, así que el código de los dos es idéntico.
 
 - **Telegraf, no cAdvisor.** cAdvisor está roto en Docker 29: lee
   `/var/lib/docker/image/<driver>/layerdb/`, que el image store de containerd
