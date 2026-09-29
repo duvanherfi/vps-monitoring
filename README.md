@@ -538,6 +538,13 @@ Durante un deploy el contenedor viejo y el nuevo conviven y ambos llevan
 si la unidad se queda sin **ningún** contenedor. El efecto secundario es que
 durante esos segundos los paneles suman los dos.
 
+La excepción son los contenedores de un solo uso de `kamal app exec` y
+`kamal console` (`app-web-exec-<versión>-<azar>`). Llevan `service` pero no
+`role`, así que acabarían como una unidad propia, `app`, y al terminar
+dispararían `UnitHasNoContainer` como crítica durante dos horas: un aviso falso
+en Telegram por cada deploy que migra con `exec`. `prometheus.yml` descarta sus
+métricas antes de construir `unit`.
+
 Si no usas Kamal, la última regla de relabeling deja `unit` igual al nombre del
 contenedor, que para Compose es lo correcto.
 

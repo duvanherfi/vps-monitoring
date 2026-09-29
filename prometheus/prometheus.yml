@@ -31,6 +31,14 @@ scrape_configs:
     static_configs:
       - targets: ["monitoring-telegraf:9273"]
     metric_relabel_configs:
+      # `kamal app exec` and `kamal console` run a one-off container named
+      # <service>-<role>-exec-<version>-<random>. It carries `service` but no
+      # `role`, so it would become a unit of its own ("app"), and the moment it
+      # exits UnitHasNoContainer fires as critical for two hours. Every deploy
+      # that runs a migration through exec paged Telegram. Not a service: drop.
+      - source_labels: [container_name]
+        regex: '.+-exec-.+'
+        action: drop
       # Build a `unit` label that survives a deploy.
       #
       # Kamal stamps service=<service> and role=<web|job> on every container it
